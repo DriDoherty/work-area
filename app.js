@@ -12,8 +12,11 @@
 var map;
 var service;
 var infowindow;
+var thisSearch;
 var FavtrCount = 0;
+var tripPOI = [];
 
+///////////////////////////////////////////////////////////////////////////////////////////
 // define constructor for searchCriteria object
 // startLoc = string of the starting point; should be town, state, country or some derivative thereof
 // distance = should be a #5, 10, 15, 20, 25, 30
@@ -27,6 +30,7 @@ var FavtrCount = 0;
 //      6 = zoo
 // includeFood = boolean
 // budget = should be a number (0 to 4)
+///////////////////////////////////////////////////////////////////////////////////////////
 
 function searchCriteria( startLoc, distance, activityArray, includeFood, budget ) {
     this.startLoc = startLoc,
@@ -36,22 +40,26 @@ function searchCriteria( startLoc, distance, activityArray, includeFood, budget 
     this.budget = budget
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////
+// define constructor for Place object
+// id = Maps API place.place_id
+// name = Maps API place.name
+// url = Maps API place.website
+///////////////////////////////////////////////////////////////////////////////////////////
 
-function Place(id, name, address, photoURL, AvgReview, openNow ) {
+function Place(id, name, url ) {
     this.id = id;
     this.name = name;
-    this.address = address;
-    this.photoURL = photoURL;
-    this.AvgReview = AvgReview;
-    this.openNow = openNow;
+    this.url = url;
 };
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Functions to support creating the map, with markers based on the user's search criteria
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 function search( searchCriteria ) {
+
+    thisSearch = searchCriteria;
 
     var searchAddress = searchCriteria.startLoc;
     
@@ -192,6 +200,7 @@ function createMarker(place) {
   google.maps.event.addListener(marker, 'click', function() {
             infowindow.close();    
             $("#place-name").text((place.name)?place.name:"N/A");
+            $("#info").attr("value", place.place_id);
             $("#favorite").attr("value", place.place_id);
             $("#place-address").text((place.vicinity)?place.vicinity:"N/A");
             $("#place-pricelevel").text((place.price_level)? ("Price level: " + place.price_level):"Price Level: N/A");
@@ -201,6 +210,76 @@ function createMarker(place) {
             infowindow.setContent(contentHTML);
             infowindow.open(map, this);
   });
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
+// function to put information on POI up (photo & opening times)
+///////////////////////////////////////////////////////////////////////////////////////////
+
+function showPOIinfo() {
+    var placeID = $(this).attr("value");
+
+    $("#info-place-name").text("");
+    $("#info-place-photo").empty();
+    $("#info-place-hours").text("");
+
+    service.getDetails( { placeId: placeID },
+                        function(place, status) {
+                            if (status === google.maps.places.PlacesServiceStatus.OK) {
+                                $("#info-place-name").html("<a href='" + place.website + "' target='_blank'>" + place.name + "</a>");
+
+                                if ( place.photos[0] ){
+                                    var ImgURL = place.photos[0].getUrl({'maxWidth': 100, 'maxHeight': 100});
+                                    var newImg = $("<img>").attr("src", ImgURL);
+                                    newImg.addClass("POIimage");
+
+                                    $("#info-place-photo").append(newImg);
+                                }
+
+                                var infoHrsHTML = "";
+
+                                for (var i=0; i<place.opening_hours.periods.length; i++) {
+                                    var schedPeriod = place.opening_hours.periods[i];
+                                    var schedDay = "";
+                                    var schedOpen = "";
+                                    var schedClose = "";
+
+                                    if ( schedPeriod.open ) {
+                                        switch( schedPeriod.open.day ) {
+                                            case 0: schedDay = "Su: ";
+                                                    break;
+                                            case 1: schedDay = "M: ";
+                                                    break;
+                                            case 2: schedDay = "Tu: ";
+                                                    break;
+                                            case 3: schedDay = "W: ";
+                                                    break;
+                                            case 4: schedDay = "Th: ";
+                                                    break;
+                                            case 5: schedDay = "F: ";
+                                                    break;
+                                            case 6: schedDay = "Sa: ";
+                                                    break;
+                                        }
+
+                                        if ( schedPeriod.open.time )  {
+                                            schedOpen = ((schedPeriod.open.hours > 12) ? (schedPeriod.open.hours-12) : schedPeriod.open.hours) + ":" + ((schedPeriod.open.minutes) ? schedPeriod.open.minutes : "00") + ((schedPeriod.open.hours > 12) ? "pm" : "am");
+                                        }
+
+                                        if (schedPeriod.close.time ) {
+                                            schedClose = ((schedPeriod.close.hours > 12) ? (schedPeriod.close.hours-12) : schedPeriod.close.hours) + ":" + ((schedPeriod.close.minutes) ? schedPeriod.close.minutes : "00") + ((schedPeriod.close.hours > 12) ? "pm" : "am");
+                                        }
+
+                                    tempHTML = infoHrsHTML;
+                                    infoHrsHTML = tempHTML.concat(schedDay + schedOpen + " - " + schedClose + "<br>");
+                                    }
+
+                                $("#info-place-hours").html("Open:<br>" + infoHrsHTML + "<br>");
+                                }                     
+                            } else {
+                                // need to post a message to the user that details were not available
+                            }
+                        });
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -215,7 +294,14 @@ function addToFavorites() {
                             if (status === google.maps.places.PlacesServiceStatus.OK) {
                                 FavtrCount++;
 
-                                var newFavRow = $("<tr id='trNum-" + FavtrCount + "'>");
+                                if ( tripPOI.length === 0 ) {
+                                    tripPOI.push(thisSearch);
+                                }
+
+                                var newPOI = new Place( place.place_id, place.name, place.website );
+                                tripPOI.push(newPOI);
+
+                                var newFavRow = $("<tr id='trNum-" + FavtrCount + "' cid='" + place.place_id + "'>");
                                 var newFavName = $("<td>");
                                 var newAnchorHTML = "<a href='" + place.website + "' target='_blank'>" + place.name + "</a>";
                                 newFavName.append(newAnchorHTML);
@@ -238,9 +324,20 @@ function addToFavorites() {
 $(document.body).on("click", ".checkbox", function() {
 
     var FavtoDel = $(this).val();
+    var rowID = "#trNum-" + FavtoDel;
 
-    // Select and Remove the specific <tr> element
-    $("#trNum-" + FavtoDel).remove();
+    // retrieve the placeid of the POI being deleted
+    var IDtoDel = $(rowID).attr("cid");
+
+    // find the POI in the tripPOI array & delete it
+    for (var i=0; i<tripPOI.length; i++) {
+        if ( tripPOI[i].id === IDtoDel ) {
+            tripPOI.splice(i, 1);
+        }
+    }
+
+    // select and remove the specific <tr> element
+    $(rowID).remove();
   });
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -271,6 +368,8 @@ function getCurrentGeoLocation() {
 
 window.onload = function () {
     $(document).on("click", "#favorite", addToFavorites);
+    $(document).on("click", "#info", showPOIinfo);
+
     $("#SearchBtn").on("click", testSearch);
 }
 
