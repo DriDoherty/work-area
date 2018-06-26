@@ -12,25 +12,56 @@
 var map;
 var service;
 var infowindow;
+var FavtrCount = 0;
+
+// define constructor for searchCriteria object
+// startLoc = string of the starting point; should be town, state, country or some derivative thereof
+// distance = should be a #5, 10, 15, 20, 25, 30
+// activityArray = array of numbers corresponding to:
+//      0 = amusement park
+//      1 = aquarium
+//      2 = art gallery
+//      3 = musuem
+//      4 = park
+//      5 = spa
+//      6 = zoo
+// includeFood = boolean
+// budget = should be a number (0 to 4)
+
+function searchCriteria( startLoc, distance, activityArray, includeFood, budget ) {
+    this.startLoc = startLoc,
+    this.distance = distance,
+    this.activityArray = activityArray,
+    this.includeFood = includeFood,
+    this.budget = budget
+}
+
+
+function Place(id, name, address, photoURL, AvgReview, openNow ) {
+    this.id = id;
+    this.name = name;
+    this.address = address;
+    this.photoURL = photoURL;
+    this.AvgReview = AvgReview;
+    this.openNow = openNow;
+};
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Functions to support creating the map, with markers based on the user's search criteria
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-function search() {
-    var searchAddress = $("#address").val().trim();
+function search( searchCriteria ) {
+
+    var searchAddress = searchCriteria.startLoc;
     
     if ( searchAddress.length ) {
         var geocoder = new google.maps.Geocoder();
 
-        console.log(searchAddress);
-        console.log( geocoder === null );
-
         geocoder.geocode(   {'address': searchAddress},
                             function(results, status) {
                                 if (status === 'OK') {
-                                    var searchCategory = $("#category").val();
-                                    searchStep2(results[0].geometry.location, searchCategory);
+                                    searchStep2(results[0].geometry.location, searchCriteria);
                                 } else {
                                     // need to post a message to the user that the "Geocoder was not successful for the following reason: ' + status
                                 }
@@ -41,22 +72,98 @@ function search() {
     }
 }
 
-function searchStep2( geoLocation, searchCategory ) {
-    console.log("geolocation: " + geoLocation);
-    
+function searchStep2( geoLocation, searchCriteria ) {
+
     map = new google.maps.Map(document.getElementById('map'), {
                 center: geoLocation,
-                zoom: 15 });
+                zoom: 15,
+                styles:[
+                    { "featureType": "administrative.land_parcel",
+                      "elementType": "labels",
+                      "stylers": [{"visibility": "off"}]
+                    },
+                    { "featureType": "poi",
+                      "elementType": "labels.text",
+                      "stylers": [{"visibility": "off"}]
+                    },
+                    { "featureType": "poi.business",
+                      "stylers": [{"visibility": "off"}]
+                    },
+                    { "featureType": "transit",
+                      "stylers": [{"visibility": "off"}]
+                    } ] });
 
     infowindow = new google.maps.InfoWindow();
-  
     service = new google.maps.places.PlacesService(map);
 
-    service.nearbySearch( { location: geoLocation,
-                            radius: 5000,
-                            type: [searchCategory]
-                          },
-                          searchCallback);
+    // calculate radius (convert miles to meters)
+    var searchRadius = searchCriteria.distance * 1609.34;
+
+    for ( var i=0; i<searchCriteria.activityArray.length; i++ ) {
+        // determine type to search on
+        var searchType = "";
+
+        switch( searchCriteria.activityArray[i] ) {
+            case 0: searchType = "amusement park";
+                    break;
+
+            case 1: searchType = "aquarium";
+                    break;
+                    
+            case 2: searchType = "art gallery";
+                    break;
+            
+            case 3: searchType = "museum";
+                    break;
+            
+            case 4: searchType = "park";
+                    break;
+            
+            case 5: searchType = "spa";
+                    break;
+            
+            case 6: searchType = "zoo";
+                    break;
+        }
+
+        if ( searchCriteria.budget ) {
+            service.nearbySearch( { location: geoLocation,
+                                    radius: searchRadius,
+                                    minPriceLevel: 0,
+                                    maxPriceLevel: searchCriteria.budget,
+                                    type: [ searchType ]
+                                  },
+                                  searchCallback);
+        } else {
+            service.nearbySearch( { location: geoLocation,
+                                    radius: searchRadius,
+                                    type: [ searchType ]
+                                  },
+                                  searchCallback);
+        }
+    }
+
+    if ( searchCriteria.includeFood ) {
+        var foodSearchTypes = ["bakery", "cafe", "restaurant"];
+
+        for ( var i=0; i<foodSearchTypes.length; i++ ) {
+            if ( searchCriteria.budget ) {
+                service.nearbySearch( { location: geoLocation,
+                                        radius: searchRadius,
+                                        minPriceLevel: 0,
+                                        maxPriceLevel: searchCriteria.budget,
+                                        type: [ foodSearchTypes[i] ]
+                                      },
+                                      searchCallback);
+            } else {
+                service.nearbySearch( { location: geoLocation,
+                                        radius: searchRadius,
+                                        type: [ foodSearchTypes[i] ]
+                                      },
+                                      searchCallback);
+            }
+        }
+    }
 }
 
 function searchCallback(results, status) {
@@ -68,23 +175,31 @@ function searchCallback(results, status) {
 }
 
 function createMarker(place) {
+
+  var icon = {
+    url: place.icon,
+    scaledSize: new google.maps.Size(25, 25),
+    origin: new google.maps.Point(0,0), // origin
+    anchor: new google.maps.Point(0,0)  // anchor
+    };
+
   var marker = new google.maps.Marker({
     map: map,
-    position: place.geometry.location
+    position: place.geometry.location,
+    icon: icon
   });
 
   google.maps.event.addListener(marker, 'click', function() {
-        infowindow.close();    
-        $("#place-icon").attr("src", (place.icon)?place.icon:"");
-        $("#place-name").text((place.name)?place.name:"N/A");
-        $("#favorite").attr("value", place.place_id);
-        $("#place-address").text((place.vicinity)?place.vicinity:"N/A");
-        $("#place-pricelevel").text((place.price_level)? ("Price level: " + place.price_level):"Price Level: N/A");
-        $("#place-rating").text((place.rating)?("Rating: " + place.rating) : "Rating: N/A");
-
-        var contentHTML = $("#infowindow-content").html();
-        infowindow.setContent(contentHTML);
-        infowindow.open(map, this);
+            infowindow.close();    
+            $("#place-name").text((place.name)?place.name:"N/A");
+            $("#favorite").attr("value", place.place_id);
+            $("#place-address").text((place.vicinity)?place.vicinity:"N/A");
+            $("#place-pricelevel").text((place.price_level)? ("Price level: " + place.price_level):"Price Level: N/A");
+            $("#place-rating").text((place.rating)?("Rating: " + place.rating) : "Rating: N/A");
+        
+            var contentHTML = $("#infowindow-content").html();
+            infowindow.setContent(contentHTML);
+            infowindow.open(map, this);
   });
 }
 
@@ -94,20 +209,39 @@ function createMarker(place) {
 
 function addToFavorites() {
     var placeID = $(this).attr("value");
-    console.log("==addToFavorites== id: " + placeID);
 
     service.getDetails( { placeId: placeID },
                         function(place, status) {
                             if (status === google.maps.places.PlacesServiceStatus.OK) {
-                                var newFavoriteRow = $("<tr>");
-                                var newFavoriteData = $("<td>").text(place.name);
-                                newFavoriteRow.append(newFavoriteData);
-                                $("#favorites-table").append(newFavoriteRow);
+                                FavtrCount++;
+
+                                var newFavRow = $("<tr id='trNum-" + FavtrCount + "'>");
+                                var newFavName = $("<td>");
+                                var newAnchorHTML = "<a href='" + place.website + "' target='_blank'>" + place.name + "</a>";
+                                newFavName.append(newAnchorHTML);
+
+                                var newFavNameDel = $("<td>");
+                                var newFavDelBtn = $("<button>");
+                                newFavDelBtn.attr("value", FavtrCount);
+                                newFavDelBtn.addClass("checkbox");
+                                newFavDelBtn.append("X");
+                                newFavNameDel.append(newFavDelBtn);
+
+                                newFavRow.append(newFavName, newFavNameDel);
+                                $("#favorites-table").append(newFavRow);
                             } else {
                                 // need to post a message to the user that details were not available
                             }
                         });
 }
+
+$(document.body).on("click", ".checkbox", function() {
+
+    var FavtoDel = $(this).val();
+
+    // Select and Remove the specific <tr> element
+    $("#trNum-" + FavtoDel).remove();
+  });
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // helper functions
@@ -137,7 +271,14 @@ function getCurrentGeoLocation() {
 
 window.onload = function () {
     $(document).on("click", "#favorite", addToFavorites);
-    $("#SearchBtn").on("click", search);
+    $("#SearchBtn").on("click", testSearch);
+}
+
+
+function testSearch() {
+console.log("===testSearch()===");
+    var mySearch = new searchCriteria( "Central Park, NY", 25, [3, 4], true );
+    search( mySearch );
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -155,7 +296,9 @@ window.onload = function () {
  "opening_hours":{  "open_now":true
                     "weekday_text":[]
                  },
- "photos":[ {"height":2831,"html_attributions":["<a href=\"https://maps.google.com/maps/contrib/114848112453403729333/photos\">Dan Lazar</a>"],"width":3939}],
+ "photos":[ {"height":2831,
+             "html_attributions":["<a href=\"https://maps.google.com/maps/contrib/114848112453403729333/photos\">
+                                   Dan Lazar</a>"],"width":3939}],
  "place_id":"ChIJWaqbDolZwokRWK8vbWSAfMk",
  "price_level":2,
  "rating":4.3,
